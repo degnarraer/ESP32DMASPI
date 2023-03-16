@@ -7,6 +7,8 @@
 #include <driver/spi_slave.h>
 #include <deque>
 
+#define SPI_DMA_CH_AUTO 3
+
 #ifndef ARDUINO_ESP32_DMA_SPI_NAMESPACE_BEGIN
 #define ARDUINO_ESP32_DMA_SPI_NAMESPACE_BEGIN \
     namespace arduino {                       \
@@ -40,15 +42,18 @@ class Slave {
         .post_setup_cb = spi_slave_setup_done,
         .post_trans_cb = spi_slave_trans_done,
     };
-
-    spi_bus_config_t bus_cfg {
-        .mosi_io_num = 13,        // HSPI
-        .miso_io_num = 12,        // HSPI
-        .sclk_io_num = 14,        // HSPI
-        .max_transfer_sz = 4092,  // default: 4092 if DMA enabled, SOC_SPI_MAXIMUM_BUFFER_SIZE if DMA disabled
-        .flags = SPICOMMON_BUSFLAG_SLAVE,
-    };
-
+	
+	spi_bus_config_t bus_cfg {
+		.mosi_io_num = 13,        // HSPI
+		.miso_io_num = 12,        // HSPI
+		.sclk_io_num = 14,        // HSPI
+		.quadwp_io_num = -1,	  // not used
+		.quadhd_io_num = -1,	  // not used
+		.max_transfer_sz = 4092,  // default: 4092 if DMA enabled, SOC_SPI_MAXIMUM_BUFFER_SIZE if DMA disabled
+		.flags = SPICOMMON_BUSFLAG_SLAVE,
+		.intr_flags = 0
+	};
+	
     spi_host_device_t host {HSPI_HOST};
     int dma_chan {SPI_DMA_CH_AUTO};  // must be 1, 2 or SPI_DMA_CH_AUTO
 
@@ -105,7 +110,7 @@ public:
 
         esp_err_t e = spi_slave_transmit(host, &transactions.back(), portMAX_DELAY);
         if (e != ESP_OK) {
-            printf("[ERROR] SPI device transmit failed : %d\n", e);
+            //printf("[ERROR] SPI device transmit failed : %d\n", e);
             transactions.pop_back();
             return 0;
         }
@@ -162,14 +167,8 @@ public:
     }
 
     // pop the oldest transaction result
-    bool pop() {
-        if(results.size() > 0){
-			results.pop_front();
-			return true;
-		}
-		else{
-			return false;
-		}
+    void pop() {
+        results.pop_front();
     }
 
     // ===== Main Configurations =====
