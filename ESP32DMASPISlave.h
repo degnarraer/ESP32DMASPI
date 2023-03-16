@@ -168,7 +168,7 @@ public:
 
     // pop the oldest transaction result
     bool pop() {
-			if(result.size() > 0){
+			if(results.size() > 0){
 			results.pop_front();
 			return true;
 		}
