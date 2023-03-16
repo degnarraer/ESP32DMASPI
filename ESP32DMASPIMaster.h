@@ -7,6 +7,8 @@
 #include <driver/spi_master.h>
 #include <deque>
 
+#define SPI_DMA_CH_AUTO 3
+
 #ifndef ARDUINO_ESP32_DMA_SPI_NAMESPACE_BEGIN
 #define ARDUINO_ESP32_DMA_SPI_NAMESPACE_BEGIN \
     namespace arduino {                       \
@@ -42,13 +44,17 @@ class Master {
         .post_cb = NULL,
     };
 
-    spi_bus_config_t bus_cfg {
-        .mosi_io_num = 13,        // HSPI
-        .miso_io_num = 12,        // HSPI
-        .sclk_io_num = 14,        // HSPI
-        .max_transfer_sz = 4092,  // default: 4092 if DMA enabled, SOC_SPI_MAXIMUM_BUFFER_SIZE if DMA disabled
-        .flags = SPICOMMON_BUSFLAG_MASTER,
-    };
+	
+	spi_bus_config_t bus_cfg {
+		.mosi_io_num = 13,        // HSPI
+		.miso_io_num = 12,        // HSPI
+		.sclk_io_num = 14,        // HSPI
+		.quadwp_io_num = -1,	  // not used
+		.quadhd_io_num = -1,	  // not used
+		.max_transfer_sz = 4092,  // default: 4092 if DMA enabled, SOC_SPI_MAXIMUM_BUFFER_SIZE if DMA disabled
+		.flags = SPICOMMON_BUSFLAG_SLAVE,
+		.intr_flags = 0
+	};
 
     spi_host_device_t host {HSPI_HOST};
     spi_device_handle_t handle;
@@ -107,14 +113,14 @@ public:
         return transfer(tx_buf, NULL, size);
     }
     size_t transfer(const uint8_t* tx_buf, uint8_t* rx_buf, const size_t size) {
-        return transfer(0, 0, 0, 0, 0, 0, tx_buf, rx_buf, size);
+        return transfer(0, 0, 0, 0, 0, tx_buf, rx_buf, size);
     }
     size_t transfer(const uint16_t cmd, const uint64_t addr, const uint8_t* tx_buf, const size_t size) {
-        return transfer(0, 0, 0, 0, cmd, addr, tx_buf, NULL, size);
+        return transfer(0, 0, 0, cmd, addr, tx_buf, NULL, size);
     }
     size_t transfer(
         const uint16_t cmd, const uint64_t addr, const uint8_t* tx_buf, uint8_t* rx_buf, const size_t size) {
-        return transfer(0, 0, 0, 0, cmd, addr, tx_buf, rx_buf, size);
+        return transfer(0, 0, 0, cmd, addr, tx_buf, rx_buf, size);
     }
     size_t transfer(
         const uint8_t command_bits,
@@ -124,12 +130,11 @@ public:
         const uint8_t* tx_buf,
         uint8_t* rx_buf,
         const size_t size) {
-        return transfer(command_bits, address_bits, 0, 0, cmd, addr, tx_buf, rx_buf, size);
+        return transfer(command_bits, address_bits, 0, cmd, addr, tx_buf, rx_buf, size);
     }
     size_t transfer(
         const uint8_t command_bits,
         const uint8_t address_bits,
-        const uint8_t dummy_bits,
         const uint32_t flags,
         const uint16_t cmd,
         const uint64_t addr,
@@ -146,7 +151,7 @@ public:
             printf("[WARN] DMA buffer size must be multiples of 4 bytes\n");
         }
 
-        addTransaction(command_bits, address_bits, dummy_bits, flags, cmd, addr, size, tx_buf, rx_buf);
+        addTransaction(command_bits, address_bits, flags, cmd, addr, size, tx_buf, rx_buf);
 
         // send a spi transaction, wait for it to complete, and return the result
         esp_err_t e = spi_device_transmit(handle, (spi_transaction_t*)&transactions.back());
@@ -168,13 +173,13 @@ public:
         return queue(tx_buf, NULL, size);
     }
     bool queue(const uint8_t* tx_buf, uint8_t* rx_buf, const size_t size) {
-        return queue(0, 0, 0, 0, 0, 0, tx_buf, rx_buf, size);
+        return queue(0, 0, 0, 0, 0, tx_buf, rx_buf, size);
     }
     bool queue(const uint16_t cmd, const uint64_t addr, const uint8_t* tx_buf, const size_t size) {
-        return queue(0, 0, 0, 0, cmd, addr, tx_buf, NULL, size);
+        return queue(0, 0, 0, cmd, addr, tx_buf, NULL, size);
     }
     bool queue(const uint16_t cmd, const uint64_t addr, const uint8_t* tx_buf, uint8_t* rx_buf, const size_t size) {
-        return queue(0, 0, 0, 0, cmd, addr, tx_buf, rx_buf, size);
+        return queue(0, 0, 0, cmd, addr, tx_buf, rx_buf, size);
     }
     bool queue(
         const uint8_t command_bits,
@@ -184,12 +189,11 @@ public:
         const uint8_t* tx_buf,
         uint8_t* rx_buf,
         const size_t size) {
-        return queue(command_bits, address_bits, 0, 0, cmd, addr, tx_buf, rx_buf, size);
+        return queue(command_bits, address_bits, 0, cmd, addr, tx_buf, rx_buf, size);
     }
     bool queue(
         const uint8_t command_bits,
         const uint8_t address_bits,
-        const uint8_t dummy_bits,
         const uint32_t flags,
         const uint16_t cmd,
         const uint64_t addr,
@@ -203,8 +207,7 @@ public:
         if (size % 4 != 0) {
             printf("[WARN] DMA buffer size must be multiples of 4 bytes\n");
         }
-
-        addTransaction(command_bits, address_bits, dummy_bits, flags, cmd, addr, size, tx_buf, rx_buf);
+        addTransaction(command_bits, address_bits, flags, cmd, addr, size, tx_buf, rx_buf);
         esp_err_t e = spi_device_queue_trans(handle, (spi_transaction_t*)&transactions.back(), portMAX_DELAY);
 
         return (e == ESP_OK);
@@ -300,28 +303,23 @@ public:
 private:
     bool initialize(const uint8_t spi_bus) {
         host = (spi_bus == HSPI) ? HSPI_HOST : VSPI_HOST;
-
         bus_cfg.flags |= SPICOMMON_BUSFLAG_MASTER;
-
         esp_err_t e = spi_bus_initialize(host, &bus_cfg, dma_chan);
         if (e != ESP_OK) {
             printf("[ERROR] SPI bus initialize failed : %d\n", e);
             return false;
         }
-
         e = spi_bus_add_device(host, &if_cfg, &handle);
         if (e != ESP_OK) {
             printf("[ERROR] SPI bus add device failed : %d\n", e);
             return false;
         }
-
         return true;
     }
 
     void addTransaction(
         const uint8_t command_bits,
         const uint8_t address_bits,
-        const uint8_t dummy_bits,
         const uint32_t flags,
         const uint16_t cmd,
         const uint64_t addr,
@@ -334,7 +332,6 @@ private:
         transactions.back().base.flags = flags;
         transactions.back().base.flags |= SPI_TRANS_VARIABLE_CMD;
         transactions.back().base.flags |= SPI_TRANS_VARIABLE_ADDR;
-        transactions.back().base.flags |= SPI_TRANS_VARIABLE_DUMMY;
 
         transactions.back().base.cmd = cmd;
         transactions.back().base.addr = addr;
@@ -346,7 +343,6 @@ private:
 
         transactions.back().command_bits = command_bits;
         transactions.back().address_bits = address_bits;
-        transactions.back().dummy_bits = dummy_bits;
     }
 };
 
