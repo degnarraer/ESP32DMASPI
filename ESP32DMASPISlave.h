@@ -162,8 +162,14 @@ public:
     }
 
     // pop the oldest transaction result
-    void pop() {
-        results.pop_front();
+    bool pop() {
+        if(results.size() > 0){
+			results.pop_front();
+			return true;
+		}
+		else{
+			return false;
+		}
     }
 
     // ===== Main Configurations =====
